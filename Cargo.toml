@@ -13,7 +13,7 @@ version         = "0.1.0"
 [profile.release]
 lto             = true
 codegen-units   = 1
-debug           = true
+debug           = false
 
 [workspace.dependencies]
 indexmap                = "2.7.0"
