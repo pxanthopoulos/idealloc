@@ -12,7 +12,9 @@ use crate::helpe::*;
 /// 
 /// This function implements the aforementioned first phase
 /// until boxing's invariants are broken.
-pub fn rogue(input: Rc<Instance>, epsilon: f64) -> Rc<Instance> {
+///
+/// `seed` drives every random choice made underneath (see [derive_seed]).
+pub fn rogue(input: Rc<Instance>, epsilon: f64, seed: u64) -> Rc<Instance> {
     let (r, mu, h, is_safe) = input.get_safety_info(epsilon);
     let target_size = (mu * h).floor() as ByteSteps;
 
@@ -20,8 +22,8 @@ pub fn rogue(input: Rc<Instance>, epsilon: f64) -> Rc<Instance> {
         // p. 562: "Assume first that lg^2r >= 1 / ε [...]"
         debug_assert!(r.log2().powi(2) >= 1.0 / epsilon);
         let (x_s, x_l) = input.split_by_height(target_size);
-        let small_boxed = c_15(Rc::new(x_s), h, mu);
-        rogue(x_l.merge_with(small_boxed), epsilon)
+        let small_boxed = c_15(Rc::new(x_s), h, mu, derive_seed(seed, 0));
+        rogue(x_l.merge_with(small_boxed), epsilon, derive_seed(seed, 1))
     } else {
         // Done.
         input
@@ -33,32 +35,29 @@ pub fn c_15(
     input:      Rc<Instance>,
     h:          f64,
     epsilon:    f64,
+    seed:       u64,
 ) -> Instance {
     // Each bucket can be treated independently.
-    // Embarassingly parallel operation. Consolidate
-    // a Mutex-protected Instance.
-    let res = Arc::new(Mutex::new(Instance::new(vec![])));
-    Instance::make_buckets(input, epsilon)
+    // Embarassingly parallel operation. Results are
+    // consolidated in ascending bucket height, so that
+    // the outcome does not depend on thread timing.
+    let boxed: Vec<Instance> = Instance::make_buckets(input, epsilon)
+        .into_iter()
+        .collect::<Vec<_>>()
         .into_par_iter()
-        .for_each(|(h_i, unit_jobs)| {
+        .map(|(h_i, unit_jobs)| {
             debug_assert!(h_i as f64 <= h, "T2 fed with zero H! (ε = {:.2})", epsilon);
             let h_param = (h / h_i as f64).floor() as ByteSteps;
-            let boxed = t_2(unit_jobs, h_param, h as ByteSteps, epsilon, None);
-            let mut guard = res.lock().unwrap();                
-            guard.merge_via_ref(boxed);
-    });
+            t_2(unit_jobs, h_param, h as ByteSteps, epsilon, None, derive_seed(seed, h_i as u64))
+        })
+        .collect();
 
-    match Arc::into_inner(res) {
-        Some(v) => {
-            v.into_inner().unwrap()
-        },
-        None    => {
-            // This shouldn't happen because all threads
-            // should have finished by now, and hence `res`
-            // should only have one strong reference.
-            panic!("Could not unwrap Arc!");
-        }
+    let mut res = Instance::new(vec![]);
+    for b in boxed {
+        res.merge_via_ref(b);
     }
+
+    res
 }
 
 /// Buchsbaum's Theorem 2.
@@ -69,6 +68,7 @@ fn t_2(
     h_real:     ByteSteps,
     epsilon:    f64,
     ctrl:       Option<T2Control>,
+    seed:       u64,
 ) -> Instance {
     let mut res_jobs: JobSet = vec![];
     let mut all_unresolved: JobSet = vec![];
@@ -76,7 +76,7 @@ fn t_2(
     // This is a recursive function. It always has `ctrl` filled
     // with something when it calls itself.
     let ctrl = if let Some(v) = ctrl { v }
-    else { T2Control::new(&input) };
+    else { T2Control::new(&input, &mut seeded_rng(seed, 0)) };
 
     // Help vector to be used below.
     let pts_vec = ctrl.critical_points
@@ -128,13 +128,17 @@ fn t_2(
         res_jobs.push(Arc::new(Job::new_box(jobs_buf, h_real)));
     }
 
-    // T2 is going to be called for all X_is in parallel.
-    let res = Arc::new(Mutex::new(Instance::new(res_jobs)));
-
+    // T2 is going to be called for all X_is in parallel. Each X_i gets
+    // its own seed, keyed by its segment index; results are merged in
+    // ascending segment index.
+    //
     // Missing tasks: (i) set X_i control structures up, do recursion for each
-    // (ii) consolidate Arc-Mutex-protected res.
-    x_is.into_par_iter()
-        .for_each(|(i, x_i)| {
+    // (ii) consolidate the results.
+    let x_is_res: Vec<Instance> = x_is.into_iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|(i, x_i)| {
+        let x_i_seed = derive_seed(seed, i as u64 + 1);
         // We shall be pulling points from this iterator.
         let mut pts_alloc_iter = points_to_allocate.iter().copied().peekable();
 
@@ -176,26 +180,27 @@ fn t_2(
         // We've exhausted all valid points to allocate to this X_i.
         if !pts_ready {
             // Injection if no liveness has been found.
+            let mut rng = seeded_rng(x_i_seed, 0);
             while !crit_pts.insert(
-                T2Control::gen_crit(&x_i, bi_start, bi_end)
+                T2Control::gen_crit(&x_i, bi_start, bi_end, &mut rng)
             ) {};
         }
 
-        let x_i_res = t_2(x_i, h, h_real, epsilon, Some(T2Control {
+        // The recursive call has `ctrl` filled, so it never draws from
+        // stream 0 of `x_i_seed` again.
+        t_2(x_i, h, h_real, epsilon, Some(T2Control {
             bounding_interval:  (bi_start, bi_end),
             critical_points:    crit_pts
-        }));
+        }), x_i_seed)
+    })
+    .collect();
 
-        let mut guard = res.lock().unwrap();
-        guard.merge_via_ref(x_i_res);
-    });
-
-    match Arc::into_inner(res) {
-        Some(i)   => {
-            i.into_inner().unwrap()
-        },
-        None  => { panic!("Bad multithreading @ T2!"); }
+    let mut res = Instance::new(res_jobs);
+    for x_i_res in x_is_res {
+        res.merge_via_ref(x_i_res);
     }
+
+    res
 }
 
 /// Implements Buchsbaum et al's Lemma 1.

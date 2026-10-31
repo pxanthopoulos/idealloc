@@ -16,6 +16,10 @@ struct Args {
     #[arg(value_enum)]
     format: InpuType,
 
+    /// Seed for the random ordering
+    #[arg(long, default_value_t = 0)]
+    seed:   u64,
+
     /// Start address
     #[arg(short, long, default_value_t = 0)]
     #[arg(value_parser = clap::value_parser!(ByteSteps))]
@@ -122,8 +126,10 @@ fn main() {
     let mut best_makespan = usize::MAX;
     let makespan = match cli.order {
         JobOrdering::Random => {
-            let mut shuffled_ids: Vec<u32> = registry.values().map(|pj| pj.descr.id).collect();
-            let mut rng = rand::thread_rng();
+            // Sorted first: `registry` is a HashMap, whose iteration order
+            // changes from process to process.
+            let mut shuffled_ids: Vec<u32> = registry.values().map(|pj| pj.descr.id).sorted().collect();
+            let mut rng = seeded_rng(cli.seed, 0);
             let mut iters = 0;
             loop {
                 shuffled_ids.shuffle(&mut rng);
@@ -145,19 +151,19 @@ fn main() {
             let ordered: PlacedJobSet = match cli.order {
                 JobOrdering::Birth  => {
                     registry.values()
-                        .sorted_by(|a, b| a.descr.birth.cmp(&b.descr.birth))
+                        .sorted_by(|a, b| a.descr.birth.cmp(&b.descr.birth).then(a.descr.id.cmp(&b.descr.id)))
                         .cloned()
                         .collect()
                 },
                 JobOrdering::Area   => {
                     registry.values()
-                        .sorted_by(|a, b| b.descr.area().cmp(&a.descr.area()))
+                        .sorted_by(|a, b| b.descr.area().cmp(&a.descr.area()).then(a.descr.id.cmp(&b.descr.id)))
                         .cloned()
                         .collect()
                 },
                 JobOrdering::Size   => {
                     registry.values()
-                        .sorted_by(|a, b| b.descr.size.cmp(&a.descr.size))
+                        .sorted_by(|a, b| b.descr.size.cmp(&a.descr.size).then(a.descr.id.cmp(&b.descr.id)))
                         .cloned()
                         .collect()
                 },

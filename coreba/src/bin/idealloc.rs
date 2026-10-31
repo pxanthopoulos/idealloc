@@ -25,7 +25,11 @@ struct Args {
     /// Maximum number of tries allowed to beat bootstrap heuristic
     #[arg(short = 'l', long, default_value_t = 1)]
     #[arg(value_parser = clap::value_parser!(u32))]
-    max_lives:  u32
+    max_lives:  u32,
+
+    /// Seed for all random choices (same seed, same placement)
+    #[arg(long, default_value_t = 0)]
+    seed:       u64,
 }
 
 fn main() {
@@ -48,5 +52,5 @@ fn main() {
         },
         InpuType::TRC   => { panic!("TRC files must first be fed to the `adapt` binary!"); },
     }.unwrap();
-    coreba::algo::idealloc(set, cli.max_frag, cli.start, cli.max_lives);
+    coreba::algo::idealloc(set, cli.max_frag, cli.start, cli.max_lives, cli.seed);
 }

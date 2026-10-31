@@ -1,4 +1,5 @@
 pub use std::{
+    collections::BTreeMap,
     rc::Rc,
     sync::{Arc, Mutex},
     io::{BufRead, BufReader, Read},
@@ -15,6 +16,34 @@ pub use itertools::Itertools;
 pub use rayon::prelude::*;
 pub use indexmap::IndexMap;
 pub use clap::{Parser, ValueEnum};
+pub use rand::{Rng, SeedableRng, rngs::StdRng};
+
+/// One 64-bit seed controls every random decision of `idealloc`.
+///
+/// Randomness is consumed inside parallel regions, so a single shared
+/// generator would make results depend on thread timing. Instead, each
+/// randomized step derives its own stream from its parent's seed and a
+/// fixed, schedule-independent key (iteration number, bucket height,
+/// segment index, ...). The same seed thus always gives the same
+/// placement, whatever the number of threads.
+#[inline(always)]
+pub fn derive_seed(seed: u64, key: u64) -> u64 {
+    splitmix64(seed ^ splitmix64(key.wrapping_add(0x9E37_79B9_7F4A_7C15)))
+}
+
+#[inline(always)]
+fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// A generator for the stream identified by (`seed`, `key`).
+#[inline(always)]
+pub fn seeded_rng(seed: u64, key: u64) -> StdRng {
+    StdRng::seed_from_u64(derive_seed(seed, key))
+}
 
 pub use crate::{Instance, Job,
     jobset::*,
@@ -418,10 +447,10 @@ pub struct T2Control {
 }
 
 impl T2Control {
-    pub fn new(jobs: &Instance) -> Self {
+    pub fn new(jobs: &Instance, rng: &mut StdRng) -> Self {
         let (start, end) = jobs.get_horizon();
         debug_assert!(start < end, "Same-ends horizon met.");
-        let mid = Self::gen_crit(jobs, start, end);
+        let mid = Self::gen_crit(jobs, start, end, rng);
 
         Self {
             bounding_interval:  (start, end),
@@ -435,11 +464,11 @@ impl T2Control {
     pub fn gen_crit(
         jobs:   &Instance, 
         left:   ByteSteps, 
-        right:  ByteSteps
+        right:  ByteSteps,
+        rng:    &mut StdRng,
     ) -> ByteSteps {
         // What follows is the simplest, most naive, but also
         // most safe implementation of `gen_crit`.
-        use rand::{Rng, thread_rng};
 
         debug_assert!(left + 1 < right, "Bad range found.");
         let mut pts: Vec<ByteSteps> = vec![];
@@ -461,7 +490,7 @@ impl T2Control {
         };
 
         // Rust ranges (x..y) are low-inclusive, upper-exclusive.
-        pts[thread_rng().gen_range(0..pts.len())]
+        pts[rng.gen_range(0..pts.len())]
     }
 }
 

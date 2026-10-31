@@ -28,6 +28,10 @@ use self::boxing::{
 /// last best placement. The *total* number of iterations is
 /// thus stochastic.
 /// 
+/// `seed` controls all of the above randomness: the same input,
+/// parameters and seed always produce the same placement, whatever
+/// the number of threads.
+///
 /// Returns the placement itself, and the corresponding
 /// makespan. If worst-case-fragmentation was exceeded,
 /// the immediately next best achieved placement is returned.
@@ -36,6 +40,7 @@ pub fn idealloc(
     worst_case_frag:    f64,
     start_address:      ByteSteps,
     max_lives:          u32,
+    seed:               u64,
 ) -> (PlacedJobRegistry, ByteSteps) {
     // Set a big enough stack size, since core algo is recursive.
     let _tpb = rayon::ThreadPoolBuilder::new().stack_size(1048576 * 1024).build_global().unwrap();
@@ -47,7 +52,7 @@ pub fn idealloc(
     // first to see if any of said cases hold. Along the way we
     // set up the context of the aforementioned heavy lifting, so
     // as to avoid repeating computations if it ends up being needed.
-    let (target_load, best_opt, placement) = match prelude_analysis(original_input, start_address) {
+    let (target_load, best_opt, placement) = match prelude_analysis(original_input, start_address, derive_seed(seed, 0)) {
         AnalysisResult::NoOverlap(jobs) => {
             // Non-overlapping jobs can all be put in the
             // same offset.
@@ -133,7 +138,7 @@ pub fn idealloc(
             let final_h = h_max as f64 / mu;
 
             while lives_left > 0 && best_opt > target_opt {
-                let boxed = c_15(pre_boxed.clone(), final_h, mu);
+                let boxed = c_15(pre_boxed.clone(), final_h, mu, derive_seed(seed, 2 * total_iters as u64));
                 debug_assert!(boxed.check_boxed_originals(to_box as u32), "Invalid boxing!");
                 let current_opt = boxed.place(&ig_reg, total_iters, best_opt, dumb_id, start_address);
                 debug_assert!(current_opt == ByteSteps::MAX || current_opt >= real_load, "Bad placement");
@@ -152,7 +157,7 @@ pub fn idealloc(
                 total_iters += 1;
                 lives_left -= 1;
                 if lives_left > 0 && best_opt > target_opt {
-                    pre_boxed = rogue(input.clone(), epsilon);
+                    pre_boxed = rogue(input.clone(), epsilon, derive_seed(seed, 2 * total_iters as u64 + 1));
                 } else { break; }
             };
 

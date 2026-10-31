@@ -97,7 +97,7 @@ pub fn get_loose_placement(
                     } else {
                         // Here we know for a fact that the jobs are of multiple sizes, and they're also
                         // overlapping. Split into size classes and treat each one independently.
-                        let mut size_buckets: HashMap<ByteSteps, JobSet> = HashMap::new();
+                        let mut size_buckets: BTreeMap<ByteSteps, JobSet> = BTreeMap::new();
                         for j in jobs {
                             size_buckets.entry(j.size)
                                 .and_modify(|e| e.push(j.clone()))

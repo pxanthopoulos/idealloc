@@ -51,8 +51,8 @@ impl Instance {
     /// context of Corollary 15. Each bucket is indexed
     /// by the height to be given to Theorem 2.
     #[inline(always)]
-    pub fn make_buckets(mut source: Rc<Self>, epsilon: f64) -> HashMap<ByteSteps, Instance> {
-        let mut res = HashMap::new();
+    pub fn make_buckets(mut source: Rc<Self>, epsilon: f64) -> BTreeMap<ByteSteps, Instance> {
+        let mut res = BTreeMap::new();
         let mut prev_floor = 1.0 / (1.0 + epsilon);
         let mut i = 0;
         while source.jobs.len() > 0 {
@@ -153,8 +153,8 @@ impl Instance {
     /// containing jobs that are live in at least one moment of those
     /// in `pts`.
     #[inline(always)]
-    pub fn split_by_liveness(mut self, pts: &BTreeSet<ByteSteps>) -> (JobSet, HashMap<ByteSteps, Instance>) {
-        let mut x_is_base: HashMap<ByteSteps, Vec<Arc<Job>>> = HashMap::new();
+    pub fn split_by_liveness(mut self, pts: &BTreeSet<ByteSteps>) -> (JobSet, BTreeMap<ByteSteps, Instance>) {
+        let mut x_is_base: BTreeMap<ByteSteps, Vec<Arc<Job>>> = BTreeMap::new();
         let mut live = vec![];
 
         let mut pts_iter = pts.iter()

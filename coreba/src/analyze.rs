@@ -14,7 +14,9 @@ use crate::{
 /// If none of (i), (ii) have concluded, the stage is set for BA's heavy
 /// lifting: a dummy [Job] is possibly inserted to ensure convergence,
 /// the [InterferenceGraph] is built, max load is computed.
-pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps) -> AnalysisResult {
+///
+/// `seed` drives the randomized boxing ([init_rogue]).
+pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> AnalysisResult {
     let prelude_cost = Instant::now();
     // For detecting overlap.
     let mut last_evt_was_birth = false;
@@ -116,12 +118,16 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps) -> AnalysisResu
         // heuristic--we thus keep it as a fallback solution.
         //
         // It's "sort by size-and-lifetime and do first-fit".
+        //
+        // Ties are broken by job ID: `registry` is a HashMap, whose
+        // iteration order changes from process to process.
         let ordered: PlacedJobSet = registry.values()
             .sorted_by(|a, b| { 
                 b.descr
                     .size
                     .cmp(&a.descr.size)
                     .then(b.descr.lifetime().cmp(&a.descr.lifetime()))
+                    .then(a.descr.id.cmp(&b.descr.id))
                 })
             .cloned()
             .collect();
@@ -203,7 +209,7 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps) -> AnalysisResu
         instance.info.set_heights((h_min, h_max));
         let (_, small_end, big_end, _) = instance.ctrl_prelude();
         assert!(small_end < big_end);
-        let (epsilon, pre_boxed) = init_rogue(instance.clone(), small_end, big_end);
+        let (epsilon, pre_boxed) = init_rogue(instance.clone(), small_end, big_end, seed);
         println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros());
         AnalysisResult::NeedsBA(BACtrl {
             input:      instance,
@@ -225,16 +231,18 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps) -> AnalysisResu
 /// which results in the smallest min/max height ratio.
 /// 
 /// Also returns the winning value's almost-converged instance.
-fn init_rogue(input: Rc<Instance>, small: f64, big: f64) -> (f64, Rc<Instance>) {
+fn init_rogue(input: Rc<Instance>, small: f64, big: f64, seed: u64) -> (f64, Rc<Instance>) {
     let mut e = small;
     let mut min_r = f64::MAX;
     let mut best_e = e;
     let mut tries_left = 3;
     let mut best: Rc<Instance> = input.clone();
     let mut _test = input.clone();
+    let mut try_idx: u64 = 0;
     loop {
         if tries_left > 0 {
-            _test = rogue(input.clone(), e);
+            _test = rogue(input.clone(), e, derive_seed(seed, try_idx));
+            try_idx += 1;
             let (r, _, _, _) = _test.get_safety_info(e);
             if r < min_r {
                 min_r = r;
