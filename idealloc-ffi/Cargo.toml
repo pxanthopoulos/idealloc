@@ -1,0 +1,16 @@
+[package]
+name = "idealloc-ffi"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+description = "C interface to the idealloc placement algorithm"
+
+[lib]
+name = "idealloc_ffi"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+coreba = { path = "../coreba" }

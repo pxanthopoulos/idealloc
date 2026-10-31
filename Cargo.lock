@@ -516,6 +516,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "idealloc-ffi"
+version = "0.1.0"
+dependencies = [
+ "coreba",
+]
+
+[[package]]
 name = "image"
 version = "0.24.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

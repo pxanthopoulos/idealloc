@@ -1,5 +1,5 @@
 [workspace]
-members         = ["uncore", "copycat", "sanity", "coreba"]
+members         = ["uncore", "copycat", "sanity", "coreba", "idealloc-ffi"]
 resolver        = "2"
 
 [workspace.package]
