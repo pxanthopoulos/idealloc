@@ -30,7 +30,7 @@ use self::boxing::{
 /// 
 /// `seed` controls all of the above randomness: the same input,
 /// parameters and seed always produce the same placement, whatever
-/// the number of threads.
+/// the number of threads. `verbose` enables progress prints on stdout.
 ///
 /// Parallel parts run on the current rayon thread pool. The core
 /// algorithm is recursive, so the pool's threads need large stacks;
@@ -45,6 +45,7 @@ pub fn idealloc(
     start_address:      ByteSteps,
     max_lives:          u32,
     seed:               u64,
+    verbose:            bool,
 ) -> (PlacedJobRegistry, ByteSteps) {
     // Measure total allocation time.
     let total_start = Instant::now();
@@ -54,7 +55,7 @@ pub fn idealloc(
     // first to see if any of said cases hold. Along the way we
     // set up the context of the aforementioned heavy lifting, so
     // as to avoid repeating computations if it ends up being needed.
-    let (target_load, best_opt, placement) = match prelude_analysis(original_input, start_address, derive_seed(seed, 0)) {
+    let (target_load, best_opt, placement) = match prelude_analysis(original_input, start_address, derive_seed(seed, 0), verbose) {
         AnalysisResult::NoOverlap(jobs) => {
             // Non-overlapping jobs can all be put in the
             // same offset.
@@ -147,7 +148,7 @@ pub fn idealloc(
                 if current_opt < best_opt {
                     debug_assert!(placement_is_valid(&ig_reg));
                     best_opt = current_opt;
-                    println!("Beating heuristic by {} bytes! ({total_iters} iterations)", heuristic_opt - best_opt);
+                    if verbose { println!("Beating heuristic by {} bytes! ({total_iters} iterations)", heuristic_opt - best_opt); }
                     final_placement = ig_reg.1
                         .values()
                         .map(|pj| {
@@ -164,7 +165,7 @@ pub fn idealloc(
             };
 
             let num_buffers = ig_reg.1.len();
-            println!(
+            if verbose { println!(
                 //"\nHeights hardness:\t{:.2}%\nConflicts hardness:\t{:.2}%\nDeaths hardness:\t{:.2}%\nCompound hardness:\t{:.2}\n{:.2}% less fragmentation against heuristic.\n",
                 "\n Buffers treated:\t{num_buffers}\nHeights hardness:\t{:.2}%\nConflicts hardness:\t{:.2}%\nDeaths hardness:\t{:.2}%\nCompound hardness:\t{:.2}\n{} fewer bytes than heuristic.\n",
                 hardness.0 * 100.0,
@@ -173,7 +174,7 @@ pub fn idealloc(
                 (1.0 + hardness.0) * (1.0 + hardness.1) * (1.0 + hardness.2),
                 //(heuristic_opt - best_opt) as f64 / real_load as f64 * 100.0
                 heuristic_opt - best_opt
-            );
+            ); }
 
             (
                 real_load,
@@ -183,16 +184,18 @@ pub fn idealloc(
         }
     };
 
-    println!(
-        "Total allocation time: {} μs",
-        total_start.elapsed().as_micros()
-    );
+    if verbose {
+        println!(
+            "Total allocation time: {} μs",
+            total_start.elapsed().as_micros()
+        );
 
-    println!("Makespan:\t{} bytes\nLOAD:\t\t{} bytes\nFragmentation:\t {:.2}%", 
-        best_opt, 
-        target_load, 
-        (best_opt - target_load) as f64 / target_load as f64 * 100.0
-    );
+        println!("Makespan:\t{} bytes\nLOAD:\t\t{} bytes\nFragmentation:\t {:.2}%", 
+            best_opt, 
+            target_load, 
+            (best_opt - target_load) as f64 / target_load as f64 * 100.0
+        );
+    }
 
     (placement, best_opt)
 }

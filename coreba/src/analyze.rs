@@ -15,8 +15,9 @@ use crate::{
 /// lifting: a dummy [Job] is possibly inserted to ensure convergence,
 /// the [InterferenceGraph] is built, max load is computed.
 ///
-/// `seed` drives the randomized boxing ([init_rogue]).
-pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> AnalysisResult {
+/// `seed` drives the randomized boxing ([init_rogue]); `verbose` enables
+/// progress prints on stdout.
+pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64, verbose: bool) -> AnalysisResult {
     let prelude_cost = Instant::now();
     // For detecting overlap.
     let mut last_evt_was_birth = false;
@@ -106,12 +107,12 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> A
         }
     };
 
-    println!("Events processed.");
+    if verbose { println!("Events processed."); }
     if !overlap_exists {
-        println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros());
+        if verbose { println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros()); }
         AnalysisResult::NoOverlap(jobs)
     } else if same_sizes {
-        println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros());
+        if verbose { println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros()); }
         AnalysisResult::SameSizes(jobs, ig, registry)
     } else {
         // We have observed a tendency to underperform against the following
@@ -131,7 +132,7 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> A
                 })
             .cloned()
             .collect();
-        println!("Size-life ordering done.");
+        if verbose { println!("Size-life ordering done."); }
         let mut symbolic_offset = 0;
         for pj in &ordered {
             pj.offset.set(symbolic_offset);
@@ -145,7 +146,7 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> A
                 ByteSteps::MAX,
                 true,
                 start_addr);
-        println!("Best-fit done.");
+        if verbose { println!("Best-fit done."); }
         // Interference graph has been built, max load has been computed.
         // BA needs to run, so we must compute epsilon, initialize rogue, etc.
         //
@@ -210,7 +211,7 @@ pub fn prelude_analysis(mut jobs: JobSet, start_addr: ByteSteps, seed: u64) -> A
         let (_, small_end, big_end, _) = instance.ctrl_prelude();
         assert!(small_end < big_end);
         let (epsilon, pre_boxed) = init_rogue(instance.clone(), small_end, big_end, seed);
-        println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros());
+        if verbose { println!("Prelude overhead: {} μs", prelude_cost.elapsed().as_micros()); }
         AnalysisResult::NeedsBA(BACtrl {
             input:      instance,
             pre_boxed,
