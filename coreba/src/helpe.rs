@@ -212,12 +212,42 @@ impl JobGen<&[ByteSteps; 4]> for MinimalloCSVParser {
     }
 }
 
+/// Lifetime semantics of an input's intervals.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Liveness {
+    /// [birth, death]: live at both ends (IREE's semantics).
+    Inclusive,
+    /// [birth, death): live at birth, dead at death.
+    InclusiveExclusive,
+}
+
+/// Converts an interval to `idealloc`'s (exclusive) semantics.
+///
+/// `idealloc` treats a job as dead at both its birth and its death, so
+/// two jobs overlap iff `b1 < d2 && b2 < d1`. Its core also needs every
+/// lifetime to be at least 2 time units, so that some integer moment lies
+/// strictly inside it. Doubling the time axis gives both while keeping
+/// the conflicts exactly as in the input:
+///
+/// - [s, e]  -> (2s, 2e + 2): 2s1 < 2e2 + 2 <=> s1 <= e2.
+/// - [s, e)  -> (2s, 2e):     2s1 < 2e2     <=> s1 <  e2.
+///
+/// The map is monotone, so the relative order of all births and deaths
+/// is unchanged.
+#[inline(always)]
+pub fn to_exclusive(birth: ByteSteps, death: ByteSteps, liveness: Liveness) -> (ByteSteps, ByteSteps) {
+    match liveness {
+        Liveness::Inclusive             => (2 * birth, 2 * death + 2),
+        Liveness::InclusiveExclusive    => (2 * birth, 2 * death),
+    }
+}
+
 /// A helper type for parsing IREE-born buffers stored into
 /// the standard minimalloc CSV format.
 /// 
 /// We introduce this additional type because IREE adopts
 /// *inclusive* semantics on both ends of a buffer's lifetime.
-/// Thus conversion is needed.
+/// Thus conversion is needed (see [to_exclusive]).
 pub struct IREECSVParser {
     pub dirty:  PathBuf,
 }
@@ -229,84 +259,30 @@ impl JobGen<Job> for IREECSVParser {
         }
     }
 
+    /// `shift` selects the input's semantics: 1 for [birth, death),
+    /// 2 for [birth, death].
+    ///
+    /// This used to remap time with a running count of "generations"
+    /// (one more at each birth following a death). The count was added
+    /// to a job's death as it stood at the job's birth, so a job born
+    /// several generations later could appear to be born after an
+    /// earlier job's death while the two actually overlapped. Real IREE
+    /// inputs lost conflicts that way and got overlapping placements.
     fn read_jobs(&self, shift: ByteSteps) -> Result<Vec<Job>, Box<dyn std::error::Error>> {
-        let helper = MinimalloCSVParser::new(self.dirty.clone());
-        // 1 (InEx) --> 0
-        // 2 (In)   --> 1
-        let increment = (shift + 1) % 2;
-        let dirty_jobs: JobSet = helper.read_jobs(0)
-            .unwrap()
-            .into_iter()
-            .map(|j| Arc::new(
-                if shift == 1 { j }
-                else {
-                    Job {
-                        size:               j.size,
-                        birth:              j.birth,
-                        death:              j.death + increment,
-                        req_size:           j.size,
-                        alignment:          None,
-                        contents:           None,
-                        originals_boxed:    0,
-                        id:                 j.id,
-
-                    }
-                }
-            ))
-            .collect();
-        let mut evts = get_events(&dirty_jobs);
-        // Increased by 1 at every first death after a birth.
-        let mut num_generations: usize = 0;
-        let mut deadline: Option<ByteSteps> = None;
-        let mut last_was_birth = true;
-        let mut upcoming_deaths: BinaryHeap<Event> = BinaryHeap::new();
-        // Collects "transformed" jobs.
-        let mut res = vec![];
-
-        while let Some(e) = evts.pop() {
-            match e.evt_t {
-                EventKind::Birth    => {
-                    if let Some(d) = deadline {
-                        if d + increment == e.time && !last_was_birth {
-                        //if d == e.time && !last_was_birth {
-                            num_generations += 1;
-                        }
-                    }
-                    upcoming_deaths.push(Event {
-                        job:    e.job.clone(),
-                        evt_t:  EventKind::Death,
-                        time:   e.job.death - increment,
-                        //time:   e.job.death
-                    });
-                    if !last_was_birth {
-                        last_was_birth = true;
-                    }
-
-                    res.push(
-                        Job {
-                            size:               e.job.size,
-                            birth:              e.job.birth + num_generations,
-                            death:              e.job.death + num_generations + increment,
-                            req_size:           e.job.size,
-                            alignment:          None,
-                            contents:           None,
-                            originals_boxed:    0,
-                            id:                 e.job.id,
-                        }
-                    );
-                },
-                EventKind::Death    => {
-                    assert!(!upcoming_deaths.is_empty());
-                    assert!(upcoming_deaths.peek().unwrap().time == e.job.death - increment);
-                    deadline = Some(upcoming_deaths.pop().unwrap().time);
-                    if last_was_birth {
-                        last_was_birth = false;
-                    }
-                },
-            }
+        let liveness = match shift {
+            1   => Liveness::InclusiveExclusive,
+            2   => Liveness::Inclusive,
+            _   => panic!("Unknown IREE CSV liveness semantics: {shift}"),
         };
+        let helper = MinimalloCSVParser::new(self.dirty.clone());
 
-        Ok(res)
+        Ok(helper.read_jobs(0)?
+            .into_iter()
+            .map(|j| {
+                let (birth, death) = to_exclusive(j.birth, j.death, liveness);
+                Job { birth, death, ..j }
+            })
+            .collect())
     }
     fn gen_single(&self, d: Job, _id: u32) -> Job {
         d
