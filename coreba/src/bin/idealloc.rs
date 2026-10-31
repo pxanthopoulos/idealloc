@@ -30,6 +30,14 @@ struct Args {
     /// Seed for all random choices (same seed, same placement)
     #[arg(long, default_value_t = 0)]
     seed:       u64,
+
+    /// Worker threads (0: one per core)
+    #[arg(short = 't', long, default_value_t = 0)]
+    threads:    usize,
+
+    /// Stack size of each worker thread, in MiB
+    #[arg(long, default_value_t = coreba::pool::DEFAULT_STACK_SIZE >> 20)]
+    stack_mib:  usize,
 }
 
 fn main() {
@@ -52,5 +60,9 @@ fn main() {
         },
         InpuType::TRC   => { panic!("TRC files must first be fed to the `adapt` binary!"); },
     }.unwrap();
-    coreba::algo::idealloc(set, cli.max_frag, cli.start, cli.max_lives, cli.seed);
+    let (max_frag, start, max_lives, seed) = (cli.max_frag, cli.start, cli.max_lives, cli.seed);
+    coreba::pool::with_pool(cli.threads, cli.stack_mib << 20, move || {
+        // The placement holds `Rc`s, which cannot leave the pool.
+        coreba::algo::idealloc(set, max_frag, start, max_lives, seed).1
+    }).expect("Could not build the thread pool");
 }

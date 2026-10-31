@@ -32,6 +32,10 @@ use self::boxing::{
 /// parameters and seed always produce the same placement, whatever
 /// the number of threads.
 ///
+/// Parallel parts run on the current rayon thread pool. The core
+/// algorithm is recursive, so the pool's threads need large stacks;
+/// see [`crate::pool`].
+///
 /// Returns the placement itself, and the corresponding
 /// makespan. If worst-case-fragmentation was exceeded,
 /// the immediately next best achieved placement is returned.
@@ -42,8 +46,6 @@ pub fn idealloc(
     max_lives:          u32,
     seed:               u64,
 ) -> (PlacedJobRegistry, ByteSteps) {
-    // Set a big enough stack size, since core algo is recursive.
-    let _tpb = rayon::ThreadPoolBuilder::new().stack_size(1048576 * 1024).build_global().unwrap();
     // Measure total allocation time.
     let total_start = Instant::now();
 

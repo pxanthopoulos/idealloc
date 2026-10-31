@@ -7,6 +7,7 @@ pub mod analyze;
 pub mod algo;
 pub mod jobset;
 pub mod helpe;
+pub mod pool;
 
 pub use crate::helpe::*;
 
