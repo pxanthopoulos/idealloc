@@ -201,3 +201,27 @@ fn is_valid(buffers: &[Buffer], sizes: &[u64], offsets: &[u64], liveness: Livene
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A slab of IREE's HRNetV2-W18-small (1024 x 2048) with two sizes within 5%: the
+    /// prelude's boxes came out taller than the final boxing's height, which then got
+    /// zero rows per box, and Lemma 1 looped for ever.
+    // Release only (cargo test --release): in debug builds, rogue's own
+    // debug_assert (lg^2 r >= 1 / epsilon) fails on it first.
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "trips rogue's debug_assert; run with --release")]
+    fn near_equal_sizes_terminate() {
+        let b = |birth, death, size| Buffer { birth, death, size };
+        let buffers = [b(0, 5, 1179648), b(1, 4, 1235520), b(3, 5, 1235520),
+                       b(5, 10, 1179648), b(6, 9, 1235520), b(8, 10, 1235520)];
+        let mut options = Options::default();
+        options.max_lives = 10;
+        options.alignment = 64;
+        let (_, makespan) = place(&buffers, &options).expect("placement");
+        // Three are live at once at most (t = 3, 4, 8, 9)
+        assert!(makespan <= 3 * 1235520);
+    }
+}

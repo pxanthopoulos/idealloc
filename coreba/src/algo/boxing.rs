@@ -213,6 +213,9 @@ fn lemma_1(
 ) -> (Option<JobSet>, JobSet) {
     // First we cut two strips, each having `outer_num` jobs
     // (if enough jobs exist)
+    // With no rows per box, the strips below would be empty and the loop
+    // endless: fail instead (the FFI reports an internal error)
+    assert!(h > 0, "Lemma 1 called with h = 0");
     let outer_num = h * (1.0 / e.powi(2)).ceil() as ByteSteps;
     let mut total_jobs = input.len();
     if total_jobs > 2 * outer_num {

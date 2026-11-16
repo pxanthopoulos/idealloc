@@ -138,9 +138,16 @@ pub fn idealloc(
                 mu = 0.99 * mu_lim;
             }
             let (_h_min, h_max) = input.min_max_height();
-            let final_h = h_max as f64 / mu;
 
             while lives_left > 0 && best_opt > target_opt {
+                // C15 buckets `pre_boxed`, whose boxes can be taller than any
+                // input job (sizes within a small ratio: rogue's box height
+                // exceeds h_max). Every bucket's height h_i must be at most
+                // the box height, or C15's rows per box, floor(H / h_i), is 0
+                // and Lemma 1 loops for ever, cutting empty strips: H comes
+                // from the tallest job being boxed. Buckets grow by (1 + mu),
+                // so with mu < mu_lim (1 / mu > 1 + mu) H = h / mu is enough.
+                let final_h = h_max.max(pre_boxed.min_max_height().1) as f64 / mu;
                 let boxed = c_15(pre_boxed.clone(), final_h, mu, derive_seed(seed, 2 * total_iters as u64));
                 debug_assert!(boxed.check_boxed_originals(to_box as u32), "Invalid boxing!");
                 let current_opt = boxed.place(&ig_reg, total_iters, best_opt, dumb_id, start_address);
